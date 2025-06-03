@@ -130,55 +130,11 @@ router.post('/register-organization', async (req, res) => {
   }
 });
 
-    const orgData = {
-      name,
-      contact_info,
-      wallet_address,
-      type: 'organization',
-      status: 'pending',
-      created_at: new Date()
-    };
-
-    const orgRef = await db.collection('organizations').add(orgData);
-
-    res.status(201).json({
-      message: 'Organization registered successfully, awaiting verification',
-      organization_id: orgRef.id,
-      data: orgData
-    });
-  } catch (error) {
+    } catch (error) {
     console.error('Error registering organization:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
-
-// Verify organization
-router.post('/verify-organization', async (req, res) => {
-  try {
-    const { organization_id, status } = req.body;
-
-    if (!organization_id || !status) {
-      return res.status(400).json({ error: 'Organization ID and status are required' });
-    }
-
-    await db.collection('organizations').doc(organization_id).update({
-      status: status,
-      verified_at: new Date()
-    });
-
-    res.json({
-      message: `Organization ${status} successfully`,
-      organization_id
-    });
-  } catch (error) {
-    console.error('Error verifying organization:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-module.exports = router;
-
-
 
 // Verify organization (admin only)
 router.post('/verify-organization', async (req, res) => {
