@@ -130,13 +130,7 @@ router.post('/register-organization', async (req, res) => {
   }
 });
 
-    } catch (error) {
-    console.error('Error registering organization:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// Verify organization (admin only)
+    // Verify organization (admin only)
 router.post('/verify-organization', async (req, res) => {
   try {
     const { organization_id, admin_wallet } = req.body;
