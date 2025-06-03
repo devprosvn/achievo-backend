@@ -25,6 +25,23 @@ app.use('/api/rewards', rewardRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/validation', validationRoutes);
 
+// Root route
+app.get('/', (req, res) => {
+  res.json({
+    message: 'NEAR Certificate API Server',
+    version: '1.0.0',
+    endpoints: {
+      auth: '/api/auth',
+      certificates: '/api/certificates', 
+      rewards: '/api/rewards',
+      payments: '/api/payments',
+      validation: '/api/validation',
+      health: '/health'
+    },
+    status: 'Server is running'
+  });
+});
+
 // Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', message: 'Server is running' });
