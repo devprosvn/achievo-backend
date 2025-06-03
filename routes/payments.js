@@ -6,26 +6,53 @@ const { db } = require('../config/firebase');
 // Process payment
 router.post('/process', async (req, res) => {
   try {
-    const { transaction_hash, amount, sender, receiver, purpose } = req.body;
+    const { amount, sender_wallet, recipient_id, purpose } = req.body;
 
-    if (!transaction_hash || !amount || !sender || !receiver) {
-      return res.status(400).json({ error: 'Required fields missing' });
+    if (!amount || !sender_wallet || !recipient_id) {
+      return res.status(400).json({ error: 'Required fields: amount, sender_wallet, recipient_id' });
     }
 
+    // Initialize NEAR connection
+    const { nearConnection } = await initNear();
+    const account = await nearConnection.account(sender_wallet);
+    const contract = new nearConnection.Contract(
+      account,
+      nearConnection.config.contractName,
+      {
+        changeMethods: ['process_payment'],
+        viewMethods: []
+      }
+    );
+
+    // Process payment on NEAR blockchain
+    try {
+      await contract.process_payment({
+        recipient_id,
+        amount
+      }, {
+        attachedDeposit: amount, // Attach the NEAR tokens
+        gas: '300000000000000' // 300 TGas
+      });
+    } catch (contractError) {
+      console.error('NEAR payment error:', contractError);
+      return res.status(400).json({ error: 'Failed to process payment on blockchain' });
+    }
+
+    // Save transaction log to Firestore
     const transactionData = {
-      transaction_hash,
       amount,
-      sender,
-      receiver,
+      sender: sender_wallet,
+      receiver: recipient_id,
       purpose: purpose || 'Payment',
       status: 'completed',
-      processed_at: new Date()
+      processed_at: new Date(),
+      blockchain_processed: true
     };
 
     const txRef = await db.collection('transactions').add(transactionData);
 
     res.status(201).json({
-      message: 'Payment processed successfully',
+      message: 'Payment processed successfully on blockchain',
       transaction_id: txRef.id,
       data: transactionData
     });

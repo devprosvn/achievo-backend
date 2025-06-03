@@ -7,7 +7,7 @@ const nearConfig = {
   walletUrl: process.env.NEAR_WALLET_URL || 'https://wallet.testnet.near.org',
   helperUrl: process.env.NEAR_HELPER_URL || 'https://helper.testnet.near.org',
   explorerUrl: process.env.NEAR_EXPLORER_URL || 'https://explorer.testnet.near.org',
-  contractName: process.env.NEAR_CONTRACT_NAME,
+  contractName: process.env.NEAR_CONTRACT_NAME || 'bernieio.testnet',
   keyStore: new keyStores.InMemoryKeyStore()
 };
 

@@ -6,18 +6,44 @@ const { db } = require('../config/firebase');
 // Grant reward
 router.post('/grant', async (req, res) => {
   try {
-    const { learner_wallet, reward_type, milestone, points } = req.body;
+    const { learner_wallet, milestone, granter_wallet } = req.body;
 
-    if (!learner_wallet || !reward_type || !milestone) {
-      return res.status(400).json({ error: 'Required fields missing' });
+    if (!learner_wallet || !milestone || !granter_wallet) {
+      return res.status(400).json({ error: 'Required fields: learner_wallet, milestone, granter_wallet' });
     }
 
+    // Initialize NEAR connection
+    const { nearConnection } = await initNear();
+    const account = await nearConnection.account(granter_wallet);
+    const contract = new nearConnection.Contract(
+      account,
+      nearConnection.config.contractName,
+      {
+        changeMethods: ['grant_reward'],
+        viewMethods: ['list_rewards']
+      }
+    );
+
+    // Call NEAR contract to grant reward
+    let rewardId;
+    try {
+      rewardId = await contract.grant_reward({
+        learner_id: learner_wallet,
+        milestone
+      });
+    } catch (contractError) {
+      console.error('NEAR contract error:', contractError);
+      return res.status(400).json({ error: 'Failed to grant reward on blockchain' });
+    }
+
+    // Save to Firestore
     const rewardData = {
+      blockchain_id: rewardId,
       learner_wallet,
-      reward_type,
       milestone,
-      points: points || 0,
+      amount: "100", // Default amount from contract
       granted_at: new Date(),
+      granter_wallet,
       status: 'active'
     };
 
@@ -26,6 +52,7 @@ router.post('/grant', async (req, res) => {
     res.status(201).json({
       message: 'Reward granted successfully',
       reward_id: rewardRef.id,
+      blockchain_id: rewardId,
       data: rewardData
     });
   } catch (error) {
