@@ -1,0 +1,201 @@
+Đặc Tả Backend Functions (Server xử lý)
+1. Xử lý đăng ký
+register_individual
+Vai trò:
+Xử lý yêu cầu đăng ký tài khoản cá nhân và lưu dữ liệu trên Firestore.
+
+Workflow:
+
+Nhận thông tin từ frontend: name, dob, email.
+
+Kiểm tra kết nối ví từ Meteor Wallet.
+
+Gọi hàm register_individual trên contract.
+
+Lưu thông tin cá nhân trên Firestore.
+
+Firestore Collections:
+
+users: Lưu thông tin người dùng.
+
+register_organization
+Vai trò:
+Xử lý đăng ký tổ chức phát hành và lưu thông tin.
+
+Workflow:
+
+Nhận thông tin từ frontend: name, contact_info.
+
+Gọi hàm register_organization trên contract.
+
+Lưu thông tin tổ chức vào Firestore với trạng thái "chờ duyệt".
+
+Firestore Collections:
+
+organizations: Lưu thông tin tổ chức.
+
+verify_organization
+Vai trò:
+Phê duyệt hoặc từ chối yêu cầu của tổ chức.
+
+Workflow:
+
+Nhận yêu cầu phê duyệt từ admin backend.
+
+Gọi hàm verify_organization trên contract.
+
+Cập nhật trạng thái trên Firestore.
+
+2. Quản lý chứng chỉ
+issue_certificate
+Vai trò:
+Tự động cấp chứng chỉ số hóa cho học viên.
+
+Workflow:
+
+Nhận yêu cầu cấp chứng chỉ từ tổ chức.
+
+Lưu metadata chứng chỉ trên Pinata (IPFS).
+
+Gọi hàm issue_certificate trên contract với CID (Content Identifier) từ Pinata.
+
+Lưu log giao dịch và metadata chứng chỉ trên Firestore.
+
+Firestore Collections:
+
+certificates: Lưu chứng chỉ với thông tin metadata và trạng thái.
+
+Pinata Endpoints:
+
+Upload Metadata:
+POST https://api.pinata.cloud/pinning/pinJSONToIPFS
+Headers:
+
+json
+Copy
+Edit
+{
+  "pinata_api_key": "<API_KEY>",
+  "pinata_secret_api_key": "<SECRET_API_KEY>"
+}
+update_certificate_status
+Vai trò:
+Cập nhật trạng thái của chứng chỉ.
+
+Workflow:
+
+Nhận yêu cầu cập nhật trạng thái.
+
+Gọi hàm update_certificate_status trên contract.
+
+Lưu log lịch sử thay đổi trạng thái trên Firestore.
+
+revoke_certificate
+Vai trò:
+Thu hồi chứng chỉ nếu phát hiện sai phạm.
+
+Workflow:
+
+Nhận yêu cầu thu hồi từ tổ chức/admin.
+
+Gọi hàm revoke_certificate trên contract.
+
+Ghi log lịch sử thu hồi trên Firestore.
+
+3. Quản lý phần thưởng
+grant_reward
+Vai trò:
+Tự động cấp phần thưởng milestone học tập.
+
+Workflow:
+
+Theo dõi tiến trình học tập qua Firestore.
+
+Khi đạt milestone, gọi hàm grant_reward trên contract.
+
+Cập nhật danh sách phần thưởng trên Firestore.
+
+Firestore Collections:
+
+rewards: Lưu phần thưởng milestone.
+
+list_rewards
+Vai trò:
+Hiển thị danh sách phần thưởng của học viên.
+
+Workflow:
+
+Truy vấn Firestore để lấy danh sách phần thưởng của học viên.
+
+Trả dữ liệu tới frontend.
+
+4. Xác thực
+validate_certificate
+Vai trò:
+Xác thực trạng thái và metadata của chứng chỉ.
+
+Workflow:
+
+Nhận yêu cầu từ frontend với certificate_id.
+
+Gọi hàm validate_certificate trên contract.
+
+Kết hợp dữ liệu Firestore và trả kết quả cho frontend.
+
+get_certificate_history
+Vai trò:
+Lấy lịch sử thay đổi của chứng chỉ.
+
+Workflow:
+
+Nhận yêu cầu từ frontend với certificate_id.
+
+Gọi hàm get_certificate_history trên contract.
+
+Trả danh sách lịch sử từ contract đến frontend.
+
+5. Thanh toán
+process_payment
+Vai trò:
+Thực hiện giao dịch thanh toán trên NEAR.
+
+Workflow:
+
+Kích hoạt Meteor Wallet để học viên/tổ chức ký giao dịch.
+
+Xác thực giao dịch thành công trên contract.
+
+Lưu lịch sử giao dịch vào Firestore.
+
+Firestore Collections:
+
+transactions: Lưu lịch sử giao dịch.
+
+Đề xuất lưu trữ trên IPFS với Pinata
+Metadata chứng chỉ:
+Lưu JSON chứa thông tin như sau:
+
+json
+Copy
+Edit
+{
+  "learner_name": "Nguyen Van A",
+  "course_name": "Blockchain Basics",
+  "issue_date": "2025-06-03",
+  "organization": "Achievo Academy",
+  "status": "Completed"
+}
+Pinata Endpoints:
+
+Upload Metadata:
+POST https://api.pinata.cloud/pinning/pinJSONToIPFS
+Headers:
+
+json
+Copy
+Edit
+{
+  "pinata_api_key": "<API_KEY>",
+  "pinata_secret_api_key": "<SECRET_API_KEY>"
+}
+Body: Metadata JSON.
