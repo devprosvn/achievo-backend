@@ -1,0 +1,725 @@
+
+import { NearBindgen, near, call, view, LookupMap, initialize } from 'near-sdk-js';
+
+// Định nghĩa các struct và enum
+export interface Individual {
+  id: string;
+  name: string;
+  dob: string;
+  email: string;
+  registered_at: string;
+}
+
+export interface Organization {
+  id: string;
+  name: string;
+  contact_info: string;
+  verified: boolean;
+  registered_at: string;
+}
+
+export interface CertificateMetadata {
+  learner_id: string;
+  course_id: string;
+  course_name: string;
+  completion_date: string;
+  issuer_org_id: string;
+  skills: string[];
+  grade?: string;
+}
+
+export interface Certificate {
+  id: string;
+  metadata: CertificateMetadata;
+  status: string; // "pending", "completed", "revoked"
+  issued_at: string;
+  updated_at: string;
+}
+
+export interface Reward {
+  id: string;
+  learner_id: string;
+  milestone: string;
+  amount: string;
+  granted_at: string;
+}
+
+export interface UpdateLog {
+  timestamp: string;
+  action: string;
+  reason: string;
+  by_account: string;
+}
+
+export enum Role {
+  Admin = "admin",
+  Moderator = "moderator", 
+  OrganizationVerifier = "organization_verifier",
+  User = "user"
+}
+
+export interface UserRole {
+  account_id: string;
+  role: Role;
+  assigned_by: string;
+  assigned_at: string;
+}
+
+export interface NFTMetadata {
+  title: string;
+  description: string;
+  media?: string;
+  media_hash?: string;
+  copies?: number;
+  issued_at?: string;
+  expires_at?: string;
+  extra?: string;
+  reference?: string;
+  reference_hash?: string;
+}
+
+export interface NFTToken {
+  token_id: string;
+  owner_id: string;
+  metadata: NFTMetadata;
+  approved_account_ids?: { [key: string]: number };
+  royalty?: { [key: string]: number };
+}
+
+@NearBindgen({})
+export class AchievoContract {
+  // Storage collections
+  individuals: LookupMap<Individual>;
+  organizations: LookupMap<Organization>;
+  certificates: LookupMap<Certificate>;
+  rewards: LookupMap<Reward>;
+  certificate_history: LookupMap<UpdateLog[]>;
+  nft_tokens: LookupMap<NFTToken>;
+  tokens_per_owner: LookupMap<string[]>;
+  user_roles: LookupMap<UserRole>;
+  
+  // Contract owner (admin)
+  owner: string;
+  
+  // Counters for generating IDs
+  certificate_counter: number;
+  reward_counter: number;
+  nft_counter: number;
+
+  constructor() {
+    this.individuals = new LookupMap<Individual>('individuals');
+    this.organizations = new LookupMap<Organization>('organizations');
+    this.certificates = new LookupMap<Certificate>('certificates');
+    this.rewards = new LookupMap<Reward>('rewards');
+    this.certificate_history = new LookupMap<UpdateLog[]>('cert_history');
+    this.nft_tokens = new LookupMap<NFTToken>('nft_tokens');
+    this.tokens_per_owner = new LookupMap<string[]>('tokens_per_owner');
+    this.user_roles = new LookupMap<UserRole>('user_roles');
+    this.owner = '';
+    this.certificate_counter = 0;
+    this.reward_counter = 0;
+    this.nft_counter = 0;
+  }
+
+  @initialize({})
+  init(): void {
+    // Set contract deployer as owner (admin)
+    this.owner = near.signerAccountId();
+    
+    // Assign admin role to contract owner
+    const admin_role: UserRole = {
+      account_id: this.owner,
+      role: Role.Admin,
+      assigned_by: this.owner,
+      assigned_at: new Date().toISOString()
+    };
+    this.user_roles.set(this.owner, admin_role);
+  }
+
+  // 1. Quản lý người dùng - Đăng ký cá nhân
+  @call({})
+  register_individual({ name, dob, email }: { name: string; dob: string; email: string }): void {
+    const caller = near.predecessorAccountId();
+    
+    // Kiểm tra xem người dùng đã đăng ký chưa
+    if (this.individuals.get(caller)) {
+      throw new Error("Individual already registered");
+    }
+
+    const individual: Individual = {
+      id: caller,
+      name,
+      dob,
+      email,
+      registered_at: new Date().toISOString()
+    };
+
+    this.individuals.set(caller, individual);
+    near.log(`Individual registered: ${caller} - ${name}`);
+  }
+
+  // 2. Đăng ký tổ chức
+  @call({})
+  register_organization({ name, contact_info }: { name: string; contact_info: string }): void {
+    const caller = near.predecessorAccountId();
+    
+    if (this.organizations.get(caller)) {
+      throw new Error("Organization already registered");
+    }
+
+    const organization: Organization = {
+      id: caller,
+      name,
+      contact_info,
+      verified: false, // Chờ duyệt
+      registered_at: new Date().toISOString()
+    };
+
+    this.organizations.set(caller, organization);
+    near.log(`Organization registered: ${caller} - ${name} (pending verification)`);
+  }
+
+  // Role-based access control functions
+  private get_user_role_internal(account_id: string): Role {
+    const user_role = this.user_roles.get(account_id);
+    return user_role ? user_role.role : Role.User;
+  }
+
+  private require_role(required_role: Role): void {
+    const caller = near.predecessorAccountId();
+    const user_role = this.get_user_role_internal(caller);
+    
+    const role_hierarchy = {
+      [Role.User]: 0,
+      [Role.OrganizationVerifier]: 1,
+      [Role.Moderator]: 2,
+      [Role.Admin]: 3
+    };
+
+    if (role_hierarchy[user_role] < role_hierarchy[required_role]) {
+      throw new Error(`Access denied. Required role: ${required_role}, your role: ${user_role}`);
+    }
+  }
+
+  private require_admin(): void {
+    this.require_role(Role.Admin);
+  }
+
+  private require_moderator_or_above(): void {
+    this.require_role(Role.Moderator);
+  }
+
+  private require_verifier_or_above(): void {
+    this.require_role(Role.OrganizationVerifier);
+  }
+
+  // Assign role (admin only)
+  @call({})
+  assign_role({ account_id, role }: { account_id: string; role: Role }): void {
+    this.require_admin();
+    const caller = near.predecessorAccountId();
+
+    // Validate role
+    if (!Object.values(Role).includes(role)) {
+      throw new Error("Invalid role");
+    }
+
+    // Cannot change admin role of contract owner
+    if (account_id === this.owner && role !== Role.Admin) {
+      throw new Error("Cannot change owner's admin role");
+    }
+
+    const user_role: UserRole = {
+      account_id,
+      role,
+      assigned_by: caller,
+      assigned_at: new Date().toISOString()
+    };
+
+    this.user_roles.set(account_id, user_role);
+    near.log(`Role assigned: ${account_id} -> ${role} by ${caller}`);
+  }
+
+  // Remove role (admin only)
+  @call({})
+  remove_role({ account_id }: { account_id: string }): void {
+    this.require_admin();
+    
+    // Cannot remove owner's role
+    if (account_id === this.owner) {
+      throw new Error("Cannot remove owner's role");
+    }
+
+    this.user_roles.remove(account_id);
+    near.log(`Role removed for: ${account_id}`);
+  }
+
+  // Get user role (view function)
+  @view({})
+  get_user_role({ account_id }: { account_id: string }): Role {
+    return this.get_user_role_internal(account_id);
+  }
+
+  // 3. Phê duyệt tổ chức (admin hoặc organization_verifier)
+  @call({})
+  verify_organization({ organization_id }: { organization_id: string }): void {
+    this.require_verifier_or_above();
+    
+    const organization = this.organizations.get(organization_id);
+    if (!organization) {
+      throw new Error("Organization not found");
+    }
+
+    organization.verified = true;
+    this.organizations.set(organization_id, organization);
+    near.log(`Organization verified: ${organization_id}`);
+  }
+
+  // 4. Phát hành chứng chỉ
+  @call({})
+  issue_certificate({ learner_id, course_id, metadata }: { 
+    learner_id: string; 
+    course_id: string; 
+    metadata: CertificateMetadata 
+  }): string {
+    const caller = near.predecessorAccountId();
+    
+    // Kiểm tra tổ chức đã được verify
+    const organization = this.organizations.get(caller);
+    if (!organization || !organization.verified) {
+      throw new Error("Only verified organizations can issue certificates");
+    }
+
+    // Kiểm tra learner tồn tại
+    if (!this.individuals.get(learner_id)) {
+      throw new Error("Learner not found");
+    }
+
+    this.certificate_counter++;
+    const certificate_id = `cert_${this.certificate_counter}`;
+
+    const certificate: Certificate = {
+      id: certificate_id,
+      metadata: {
+        ...metadata,
+        learner_id,
+        course_id,
+        issuer_org_id: caller
+      },
+      status: "pending",
+      issued_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+
+    this.certificates.set(certificate_id, certificate);
+    
+    // Tạo log entry đầu tiên
+    const initial_log: UpdateLog = {
+      timestamp: new Date().toISOString(),
+      action: "issued",
+      reason: "Certificate issued",
+      by_account: caller
+    };
+    this.certificate_history.set(certificate_id, [initial_log]);
+
+    near.log(`Certificate issued: ${certificate_id} for ${learner_id}`);
+    return certificate_id;
+  }
+
+  // 5. Cập nhật trạng thái chứng chỉ
+  @call({})
+  update_certificate_status({ certificate_id, new_status }: { 
+    certificate_id: string; 
+    new_status: string 
+  }): void {
+    const caller = near.predecessorAccountId();
+    const certificate = this.certificates.get(certificate_id);
+    
+    if (!certificate) {
+      throw new Error("Certificate not found");
+    }
+
+    // Kiểm tra quyền (chỉ tổ chức phát hành hoặc admin)
+    if (certificate.metadata.issuer_org_id !== caller) {
+      throw new Error("Unauthorized to update this certificate");
+    }
+
+    certificate.status = new_status;
+    certificate.updated_at = new Date().toISOString();
+    this.certificates.set(certificate_id, certificate);
+
+    // Thêm log
+    const history = this.certificate_history.get(certificate_id) || [];
+    history.push({
+      timestamp: new Date().toISOString(),
+      action: "status_updated",
+      reason: `Status changed to ${new_status}`,
+      by_account: caller
+    });
+    this.certificate_history.set(certificate_id, history);
+
+    near.log(`Certificate ${certificate_id} status updated to: ${new_status}`);
+  }
+
+  // 6. Thu hồi chứng chỉ
+  @call({})
+  revoke_certificate({ certificate_id, reason }: { 
+    certificate_id: string; 
+    reason: string 
+  }): void {
+    const caller = near.predecessorAccountId();
+    const certificate = this.certificates.get(certificate_id);
+    
+    if (!certificate) {
+      throw new Error("Certificate not found");
+    }
+
+    const user_role = this.get_user_role_internal(caller);
+    
+    // Issuer or moderator+ can revoke certificates
+    if (certificate.metadata.issuer_org_id !== caller && 
+        user_role !== Role.Moderator && user_role !== Role.Admin) {
+      throw new Error("Unauthorized to revoke this certificate");
+    }
+
+    certificate.status = "revoked";
+    certificate.updated_at = new Date().toISOString();
+    this.certificates.set(certificate_id, certificate);
+
+    // Thêm log
+    const history = this.certificate_history.get(certificate_id) || [];
+    history.push({
+      timestamp: new Date().toISOString(),
+      action: "revoked",
+      reason,
+      by_account: caller
+    });
+    this.certificate_history.set(certificate_id, history);
+
+    near.log(`Certificate ${certificate_id} revoked. Reason: ${reason}`);
+  }
+
+  // 7. Cấp phần thưởng (moderator trở lên)
+  @call({})
+  grant_reward({ learner_id, milestone }: { 
+    learner_id: string; 
+    milestone: string 
+  }): string {
+    this.require_moderator_or_above();
+    
+    if (!this.individuals.get(learner_id)) {
+      throw new Error("Learner not found");
+    }
+
+    this.reward_counter++;
+    const reward_id = `reward_${this.reward_counter}`;
+
+    const reward: Reward = {
+      id: reward_id,
+      learner_id,
+      milestone,
+      amount: "100", // Có thể customize
+      granted_at: new Date().toISOString()
+    };
+
+    this.rewards.set(reward_id, reward);
+    near.log(`Reward granted: ${reward_id} to ${learner_id} for ${milestone}`);
+    return reward_id;
+  }
+
+  // 8. Liệt kê phần thưởng của học viên
+  @view({})
+  list_rewards({ learner_id }: { learner_id: string }): Reward[] {
+    const rewards: Reward[] = [];
+    
+    // Iterate through all rewards to find those belonging to the learner
+    // Note: In production, consider using a more efficient indexing system
+    for (let i = 1; i <= this.reward_counter; i++) {
+      const reward = this.rewards.get(`reward_${i}`);
+      if (reward && reward.learner_id === learner_id) {
+        rewards.push(reward);
+      }
+    }
+    
+    return rewards;
+  }
+
+  // 9. Xác thực chứng chỉ
+  @view({})
+  validate_certificate({ certificate_id }: { certificate_id: string }): CertificateMetadata | null {
+    const certificate = this.certificates.get(certificate_id);
+    
+    if (!certificate) {
+      return null;
+    }
+
+    if (certificate.status === "revoked") {
+      throw new Error("Certificate has been revoked");
+    }
+
+    return certificate.metadata;
+  }
+
+  // 10. Lấy lịch sử chứng chỉ
+  @view({})
+  get_certificate_history({ certificate_id }: { certificate_id: string }): UpdateLog[] {
+    const history = this.certificate_history.get(certificate_id);
+    return history || [];
+  }
+
+  // 11. Xử lý thanh toán
+  @call({ payableFunction: true })
+  process_payment({ recipient_id, amount }: { 
+    recipient_id: string; 
+    amount: string 
+  }): void {
+    const sender = near.predecessorAccountId();
+    const attached_deposit = near.attachedDeposit();
+    const payment_amount = BigInt(amount);
+
+    if (attached_deposit < payment_amount) {
+      throw new Error("Insufficient attached deposit");
+    }
+
+    // Kiểm tra recipient tồn tại
+    if (!this.individuals.get(recipient_id) && !this.organizations.get(recipient_id)) {
+      throw new Error("Recipient not found");
+    }
+
+    // Transfer NEAR tokens
+    const promise = near.promiseBatchCreate(recipient_id);
+    near.promiseBatchActionTransfer(promise, payment_amount);
+    near.promiseReturn(promise);
+
+    near.log(`Payment processed: ${sender} -> ${recipient_id}, amount: ${amount}`);
+  }
+
+  // Utility view methods
+  @view({})
+  get_individual({ account_id }: { account_id: string }): Individual | null {
+    return this.individuals.get(account_id);
+  }
+
+  @view({})
+  get_organization({ account_id }: { account_id: string }): Organization | null {
+    return this.organizations.get(account_id);
+  }
+
+  @view({})
+  get_certificate({ certificate_id }: { certificate_id: string }): Certificate | null {
+    return this.certificates.get(certificate_id);
+  }
+
+  // NFT Functions
+
+  // 12. Mint NFT Certificate
+  @call({})
+  mint_nft_certificate({ 
+    receiver_id, 
+    metadata, 
+    certificate_id 
+  }: { 
+    receiver_id: string; 
+    metadata: NFTMetadata; 
+    certificate_id?: string 
+  }): string {
+    const caller = near.predecessorAccountId();
+    
+    // Kiểm tra tổ chức đã được verify
+    const organization = this.organizations.get(caller);
+    if (!organization || !organization.verified) {
+      throw new Error("Only verified organizations can mint NFT certificates");
+    }
+
+    // Kiểm tra receiver tồn tại
+    if (!this.individuals.get(receiver_id) && !this.organizations.get(receiver_id)) {
+      throw new Error("Receiver not found");
+    }
+
+    this.nft_counter++;
+    const token_id = `nft_cert_${this.nft_counter}`;
+
+    // Tạo NFT metadata với thông tin certificate
+    const nft_metadata: NFTMetadata = {
+      ...metadata,
+      title: metadata.title || "Achievement Certificate",
+      description: metadata.description || "Digital certificate of achievement",
+      issued_at: new Date().toISOString(),
+      extra: certificate_id ? `certificate_id:${certificate_id}` : undefined
+    };
+
+    const nft_token: NFTToken = {
+      token_id,
+      owner_id: receiver_id,
+      metadata: nft_metadata,
+      approved_account_ids: {},
+      royalty: { [caller]: 500 } // 5% royalty cho tổ chức phát hành
+    };
+
+    this.nft_tokens.set(token_id, nft_token);
+
+    // Cập nhật danh sách tokens của owner
+    const owner_tokens = this.tokens_per_owner.get(receiver_id) || [];
+    owner_tokens.push(token_id);
+    this.tokens_per_owner.set(receiver_id, owner_tokens);
+
+    near.log(`NFT Certificate minted: ${token_id} for ${receiver_id} by ${caller}`);
+    return token_id;
+  }
+
+  // 13. Transfer NFT
+  @call({})
+  nft_transfer({ 
+    receiver_id, 
+    token_id, 
+    approval_id, 
+    memo 
+  }: { 
+    receiver_id: string; 
+    token_id: string; 
+    approval_id?: number; 
+    memo?: string 
+  }): void {
+    const caller = near.predecessorAccountId();
+    const token = this.nft_tokens.get(token_id);
+    
+    if (!token) {
+      throw new Error("Token not found");
+    }
+
+    // Kiểm tra quyền sở hữu hoặc approved
+    const is_owner = token.owner_id === caller;
+    const is_approved = token.approved_account_ids && token.approved_account_ids[caller] !== undefined;
+    
+    if (!is_owner && !is_approved) {
+      throw new Error("Unauthorized to transfer this token");
+    }
+
+    // Kiểm tra receiver tồn tại
+    if (!this.individuals.get(receiver_id) && !this.organizations.get(receiver_id)) {
+      throw new Error("Receiver not found");
+    }
+
+    // Cập nhật owner tokens
+    const old_owner_tokens = this.tokens_per_owner.get(token.owner_id) || [];
+    const updated_old_tokens = old_owner_tokens.filter(id => id !== token_id);
+    this.tokens_per_owner.set(token.owner_id, updated_old_tokens);
+
+    const new_owner_tokens = this.tokens_per_owner.get(receiver_id) || [];
+    new_owner_tokens.push(token_id);
+    this.tokens_per_owner.set(receiver_id, new_owner_tokens);
+
+    // Cập nhật token
+    token.owner_id = receiver_id;
+    token.approved_account_ids = {};
+    this.nft_tokens.set(token_id, token);
+
+    near.log(`NFT transferred: ${token_id} from ${caller} to ${receiver_id}`);
+  }
+
+  // 14. Approve NFT
+  @call({})
+  nft_approve({ 
+    token_id, 
+    account_id, 
+    msg 
+  }: { 
+    token_id: string; 
+    account_id: string; 
+    msg?: string 
+  }): void {
+    const caller = near.predecessorAccountId();
+    const token = this.nft_tokens.get(token_id);
+    
+    if (!token) {
+      throw new Error("Token not found");
+    }
+
+    if (token.owner_id !== caller) {
+      throw new Error("Only token owner can approve");
+    }
+
+    if (!token.approved_account_ids) {
+      token.approved_account_ids = {};
+    }
+
+    token.approved_account_ids[account_id] = 1;
+    this.nft_tokens.set(token_id, token);
+
+    near.log(`NFT approved: ${token_id} approved for ${account_id}`);
+  }
+
+  // 15. Revoke NFT approval
+  @call({})
+  nft_revoke({ token_id, account_id }: { token_id: string; account_id: string }): void {
+    const caller = near.predecessorAccountId();
+    const token = this.nft_tokens.get(token_id);
+    
+    if (!token) {
+      throw new Error("Token not found");
+    }
+
+    if (token.owner_id !== caller) {
+      throw new Error("Only token owner can revoke approval");
+    }
+
+    if (token.approved_account_ids && token.approved_account_ids[account_id] !== undefined) {
+      delete token.approved_account_ids[account_id];
+      this.nft_tokens.set(token_id, token);
+    }
+
+    near.log(`NFT approval revoked: ${token_id} for ${account_id}`);
+  }
+
+  // NFT View Functions
+
+  @view({})
+  nft_token({ token_id }: { token_id: string }): NFTToken | null {
+    return this.nft_tokens.get(token_id);
+  }
+
+  @view({})
+  nft_tokens_for_owner({ 
+    account_id, 
+    from_index, 
+    limit 
+  }: { 
+    account_id: string; 
+    from_index?: number; 
+    limit?: number 
+  }): NFTToken[] {
+    const token_ids = this.tokens_per_owner.get(account_id) || [];
+    const start = from_index || 0;
+    const end = limit ? Math.min(start + limit, token_ids.length) : token_ids.length;
+    
+    const tokens: NFTToken[] = [];
+    for (let i = start; i < end; i++) {
+      const token = this.nft_tokens.get(token_ids[i]);
+      if (token) {
+        tokens.push(token);
+      }
+    }
+    
+    return tokens;
+  }
+
+  @view({})
+  nft_supply_for_owner({ account_id }: { account_id: string }): number {
+    const token_ids = this.tokens_per_owner.get(account_id) || [];
+    return token_ids.length;
+  }
+
+  @view({})
+  nft_total_supply(): number {
+    return this.nft_counter;
+  }
+
+  @view({})
+  nft_metadata(): { spec: string; name: string; symbol: string } {
+    return {
+      spec: "nft-1.0.0",
+      name: "Achievo Certificates",
+      symbol: "ACHIEVO"
+    };
+  }
+}
