@@ -17,6 +17,7 @@ const certificateRoutes = require('./routes/certificates');
 const rewardRoutes = require('./routes/rewards');
 const paymentRoutes = require('./routes/payments');
 const validationRoutes = require('./routes/validation');
+const adminRoutes = require('./routes/admin');
 
 // Routes
 app.use('/api/auth', authRoutes);
@@ -24,6 +25,7 @@ app.use('/api/certificates', certificateRoutes);
 app.use('/api/rewards', rewardRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/validation', validationRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Root route
 app.get('/', (req, res) => {
@@ -36,6 +38,7 @@ app.get('/', (req, res) => {
       rewards: '/api/rewards',
       payments: '/api/payments',
       validation: '/api/validation',
+      admin: '/api/admin',
       health: '/health'
     },
     status: 'Server is running'
