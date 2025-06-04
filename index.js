@@ -18,6 +18,8 @@ const rewardRoutes = require('./routes/rewards');
 const paymentRoutes = require('./routes/payments');
 const validationRoutes = require('./routes/validation');
 const adminRoutes = require('./routes/admin');
+const nftRoutes = require('./routes/nft');
+const roleRoutes = require('./routes/roles');
 
 // Routes
 app.use('/api/auth', authRoutes);
@@ -26,6 +28,8 @@ app.use('/api/rewards', rewardRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/validation', validationRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/nft', nftRoutes);
+app.use('/api/roles', roleRoutes);
 
 // Root route
 app.get('/', (req, res) => {
@@ -39,6 +43,8 @@ app.get('/', (req, res) => {
       payments: '/api/payments',
       validation: '/api/validation',
       admin: '/api/admin',
+      nft: '/api/nft',
+      roles: '/api/roles',
       health: '/health'
     },
     status: 'Server is running'

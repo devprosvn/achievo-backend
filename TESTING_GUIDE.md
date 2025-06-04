@@ -152,6 +152,112 @@ Headers: { "wallet_address": "achievo.testnet" }
 - Can grant rewards
 - Offers multiple courses
 
+### NFT Certificate Testing
+
+#### Mint NFT Certificate (as Verified Organization)
+```bash
+POST /api/nft/mint
+Headers: { "wallet_address": "achievo-org.testnet" }
+Content-Type: application/json
+
+{
+  "receiver_id": "achievo-student.testnet",
+  "metadata": {
+    "title": "Blockchain Expert Certificate",
+    "description": "NFT certificate for completing advanced blockchain course",
+    "media": "https://example.com/certificate.png"
+  },
+  "certificate_id": "cert_1"
+}
+```
+
+#### Transfer NFT Certificate
+```bash
+POST /api/nft/transfer
+Headers: { "wallet_address": "achievo-student.testnet" }
+Content-Type: application/json
+
+{
+  "receiver_id": "another-student.testnet",
+  "token_id": "nft_cert_1",
+  "memo": "Transferring certificate"
+}
+```
+
+#### Get NFT Certificates for Owner
+```bash
+GET /api/nft/owner/achievo-student.testnet?from_index=0&limit=10
+```
+
+#### Get Specific NFT Token
+```bash
+GET /api/nft/token/nft_cert_1
+```
+
+### Role Management Testing
+
+#### Assign Role (as Admin)
+```bash
+POST /api/roles/assign
+Headers: { "wallet_address": "achievo.testnet" }
+Content-Type: application/json
+
+{
+  "account_id": "new-verifier.testnet",
+  "role": "organization_verifier"
+}
+```
+
+#### Remove Role (as Admin)
+```bash
+POST /api/roles/remove
+Headers: { "wallet_address": "achievo.testnet" }
+Content-Type: application/json
+
+{
+  "account_id": "old-moderator.testnet"
+}
+```
+
+#### Get User Role
+```bash
+GET /api/roles/user/achievo-student.testnet
+```
+
+#### Get Current User Role
+```bash
+GET /api/roles/me
+Headers: { "wallet_address": "achievo-student.testnet" }
+```
+
+### Enhanced Permission Testing
+
+#### Grant Reward (Moderator Only)
+```bash
+POST /api/rewards/grant
+Headers: { "wallet_address": "achievo-admin.testnet" }
+Content-Type: application/json
+
+{
+  "learner_wallet": "achievo-student.testnet",
+  "milestone": "Excellence Award",
+  "granter_wallet": "achievo-admin.testnet"
+}
+```
+
+#### Revoke Certificate (Moderator/Admin or Issuer)
+```bash
+POST /api/certificates/revoke
+Headers: { "wallet_address": "achievo-admin.testnet" }
+Content-Type: application/json
+
+{
+  "certificate_id": "cert_1",
+  "reason": "Policy violation",
+  "organization_wallet": "achievo-admin.testnet"
+}
+```
+
 ## Error Testing
 
 ### Invalid Authentication
@@ -163,6 +269,24 @@ POST /api/admin/users
 # Wrong wallet address  
 POST /api/admin/users
 Headers: { "wallet_address": "invalid.testnet" }
+# Expected: 403 Forbidden
+```
+
+### Role-Based Access Control
+```bash
+# User trying to access admin function
+POST /api/roles/assign
+Headers: { "wallet_address": "achievo-student.testnet" }
+# Expected: 403 Forbidden
+
+# User trying to grant rewards
+POST /api/rewards/grant
+Headers: { "wallet_address": "achievo-student.testnet" }
+# Expected: 403 Forbidden
+
+# Unverified organization trying to mint NFT
+POST /api/nft/mint
+Headers: { "wallet_address": "unverified-org.testnet" }
 # Expected: 403 Forbidden
 ```
 

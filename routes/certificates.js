@@ -3,6 +3,49 @@ const express = require('express');
 const router = express.Router();
 const { db } = require('../config/firebase');
 const { uploadJSONToIPFS } = require('../config/pinata');
+const { initNear } = require('../config/near');
+
+// Middleware to check if user has moderator or admin role
+const checkModeratorOrAdmin = async (req, res, next) => {
+  try {
+    const { wallet_address } = req.headers;
+    
+    if (!wallet_address) {
+      return res.status(401).json({ error: 'Wallet address required' });
+    }
+
+    // Initialize NEAR connection
+    const { nearConnection } = await initNear();
+    const account = await nearConnection.account(nearConnection.config.contractName);
+    const contract = new nearConnection.Contract(
+      account,
+      nearConnection.config.contractName,
+      {
+        viewMethods: ['get_user_role']
+      }
+    );
+
+    // Get user role from contract
+    let userRole;
+    try {
+      userRole = await contract.get_user_role({ account_id: wallet_address });
+    } catch (error) {
+      userRole = 'user'; // Default role
+    }
+
+    if (userRole !== 'moderator' && userRole !== 'admin') {
+      return res.status(403).json({ 
+        error: 'Moderator or admin access required' 
+      });
+    }
+
+    req.userRole = userRole;
+    next();
+  } catch (error) {
+    console.error('Role check error:', error);
+    res.status(500).json({ error: 'Role verification failed' });
+  }
+};
 
 // Issue certificate
 router.post('/issue', async (req, res) => {
@@ -191,7 +234,7 @@ router.put('/update-status', async (req, res) => {
   }
 });
 
-// Revoke certificate
+// Revoke certificate (moderator/admin or issuer organization)
 router.post('/revoke', async (req, res) => {
   try {
     const { certificate_id, reason, organization_wallet } = req.body;
@@ -207,6 +250,34 @@ router.post('/revoke', async (req, res) => {
     }
 
     const certData = certDoc.data();
+
+    // Check user role for additional permissions
+    let userRole = 'user';
+    try {
+      const { nearConnection: roleConnection } = await initNear();
+      const roleAccount = await roleConnection.account(roleConnection.config.contractName);
+      const roleContract = new nearConnection.Contract(
+        roleAccount,
+        roleConnection.config.contractName,
+        {
+          viewMethods: ['get_user_role']
+        }
+      );
+      userRole = await roleContract.get_user_role({ account_id: organization_wallet });
+    } catch (error) {
+      // Continue with default role
+    }
+
+    // Check permissions: must be issuer organization OR moderator/admin
+    const canRevoke = certData.organization_wallet === organization_wallet || 
+                     userRole === 'moderator' || 
+                     userRole === 'admin';
+    
+    if (!canRevoke) {
+      return res.status(403).json({ 
+        error: 'Only issuer organization, moderators, or admins can revoke certificates' 
+      });
+    }
 
     // Initialize NEAR connection
     const { nearConnection } = await initNear();

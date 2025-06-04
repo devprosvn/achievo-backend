@@ -13,13 +13,34 @@ const checkAdminAuth = async (req, res, next) => {
       return res.status(401).json({ error: 'Wallet address required' });
     }
 
-    // Check if wallet belongs to admin or superuser
+    // Initialize NEAR connection to check role
+    const { nearConnection } = await initNear();
+    const account = await nearConnection.account(nearConnection.config.contractName);
+    const contract = new nearConnection.Contract(
+      account,
+      nearConnection.config.contractName,
+      {
+        viewMethods: ['get_user_role']
+      }
+    );
+
+    // Get user role from contract
+    let userRole;
+    try {
+      userRole = await contract.get_user_role({ account_id: wallet_address });
+    } catch (error) {
+      userRole = 'user'; // Default role
+    }
+
+    // Allow admin and backup check for legacy accounts
     const allowedAdmins = ['achievo.testnet', 'achievo-admin.testnet'];
+    const isLegacyAdmin = allowedAdmins.includes(wallet_address);
     
-    if (!allowedAdmins.includes(wallet_address)) {
+    if (userRole !== 'admin' && !isLegacyAdmin) {
       return res.status(403).json({ error: 'Admin access required' });
     }
 
+    req.userRole = userRole;
     next();
   } catch (error) {
     console.error('Admin auth error:', error);
@@ -66,8 +87,44 @@ router.get('/sample-data-info', async (req, res) => {
   }
 });
 
-// Verify organization (admin only)
-router.post('/verify-organization/:org_id', checkAdminAuth, async (req, res) => {
+// Verify organization (admin or organization_verifier)
+router.post('/verify-organization/:org_id', async (req, res) => {
+  try {
+    const { wallet_address } = req.headers;
+    
+    if (!wallet_address) {
+      return res.status(401).json({ error: 'Wallet address required' });
+    }
+
+    // Check user role
+    const { nearConnection } = await initNear();
+    const account = await nearConnection.account(nearConnection.config.contractName);
+    const contract = new nearConnection.Contract(
+      account,
+      nearConnection.config.contractName,
+      {
+        viewMethods: ['get_user_role']
+      }
+    );
+
+    let userRole;
+    try {
+      userRole = await contract.get_user_role({ account_id: wallet_address });
+    } catch (error) {
+      userRole = 'user'; // Default role
+    }
+
+    // Allow admin, organization_verifier, or legacy admin accounts
+    const allowedAdmins = ['achievo.testnet', 'achievo-admin.testnet'];
+    const hasPermission = userRole === 'admin' || 
+                         userRole === 'organization_verifier' || 
+                         allowedAdmins.includes(wallet_address);
+    
+    if (!hasPermission) {
+      return res.status(403).json({ 
+        error: 'Admin or organization verifier access required' 
+      });
+    }
   try {
     const { org_id } = req.params;
     
