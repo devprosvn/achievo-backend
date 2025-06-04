@@ -125,7 +125,7 @@ router.post('/verify-organization/:org_id', async (req, res) => {
         error: 'Admin or organization verifier access required' 
       });
     }
-  try {
+
     const { org_id } = req.params;
     
     await db.collection('organizations').doc(org_id).update({
